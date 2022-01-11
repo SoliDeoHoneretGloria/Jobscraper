@@ -1,9 +1,11 @@
 package main
 
 import (
+	"encoding/csv"
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 
@@ -13,7 +15,7 @@ import (
 type extractedJob struct {
 	id       string
 	title    string
-	company  string
+	name     string
 	location string
 	salary   string
 	summary  string
@@ -25,14 +27,43 @@ var baseURL string = "https://kr.indeed.com/jobs?q=python&limit=50"
 var LastpageURL string = "https://kr.indeed.com/jobs?q=python&limit=50&start=9999"
 
 func main() {
+
+	var jobs []extractedJob
 	totalPages := getPages()
 
 	for i := 0; i < totalPages; i++ {
-		getPage(i)
+		extractedjobs := getPage(i)
+		jobs = append(jobs, extractedjobs...)
 	}
+	writeJobs(jobs)
+	fmt.Println("Done, Extracted", len(jobs))
 }
 
-func getPage(page int) {
+func writeJobs(jobs []extractedJob) {
+	file, err := os.Create("jobs.csv")
+	checkErr(err)
+
+	utf8bom := []byte{0xEF, 0xBB, 0xBF}
+	file.Write(utf8bom)
+
+	w := csv.NewWriter(file)
+	defer w.Flush()
+
+	headers := []string{"ID", "Title", "Name", "Location", "Salary", "Summary"}
+
+	wErr := w.Write(headers)
+	checkErr(wErr)
+
+	for _, job := range jobs {
+		jobSlice := []string{"https://kr.indeed.com/viewjob?jk=" + job.id, job.title, job.name, job.location, job.salary, job.summary}
+		jwErr := w.Write(jobSlice)
+		checkErr(jwErr)
+	}
+
+}
+
+func getPage(page int) []extractedJob {
+	var jobs []extractedJob
 	pageURL := baseURL + "&start=" + strconv.Itoa(page*50)
 	fmt.Println("Requesting", pageURL)
 	res, err := http.Get(pageURL)
@@ -46,18 +77,26 @@ func getPage(page int) {
 	searchCards := doc.Find(".tapItem")
 
 	searchCards.Each(func(i int, card *goquery.Selection) {
-		extractJob(card)
+		job := extractJob(card)
+		jobs = append(jobs, job)
 	})
+	return jobs
 }
 
-func extractJob(card *goquery.Selection) {
+func extractJob(card *goquery.Selection) extractedJob {
 	id, _ := card.Attr("data-jk")
-	title := card.Find(".jobTitle>span").Text()
-	name := card.Find("span.companyName").Text()
-	location := card.Find(".companyLocation").Text()
-	salary := card.Find(".salary-snippet").Text()
-	summary := card.Find(".job-snippet").Text()
-	fmt.Println(id, title, name, location, salary, summary)
+	title := cleanString(card.Find(".jobTitle>span").Text())
+	name := cleanString(card.Find("span.companyName").Text())
+	location := cleanString(card.Find(".companyLocation").Text())
+	salary := cleanString(card.Find(".salary-snippet").Text())
+	summary := cleanString(card.Find(".job-snippet").Text())
+	return extractedJob{
+		id:       id,
+		title:    title,
+		name:     name,
+		location: location,
+		salary:   salary,
+		summary:  summary}
 
 }
 
